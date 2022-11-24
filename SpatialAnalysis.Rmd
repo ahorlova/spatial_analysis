@@ -1,0 +1,155 @@
+```{r}
+options(bitmapType='cairo')
+```
+
+```{r}
+library("spatstat")
+library("raster")
+library("EBImage")
+library("cytomapper")
+library("tidyverse")
+library("igraph")
+library("pheatmap")
+library("ggplot2")
+library("imcRtools")
+library("SpatialExperiment")
+library("viridis")
+```
+
+
+```{r}
+#Uploading labeled cells data
+prelim_ann <- read_csv("/filepath/preliminary_annotations.csv")
+colnames(prelim_ann)[which(names(prelim_ann) == "cell")] <- "id"
+dim(prelim_ann)
+```
+
+```{r}
+main_dir <- "/filepath/tables/"
+file_names <- list.files(main_dir,recursive = TRUE)
+```
+
+#Try for 3 samples
+```{r}
+sample_try <- c("Patient1_s2", "Patient2_s1", "Patient2_s2")
+file_try <- c("191_1_01.csv", "191_1_10.csv", "191_1_11.csv")
+
+table <- as.data.frame(read_csv((paste(main_dir, file_try[1], sep="/")), show_col_types = FALSE))
+table <- data.frame(id = table[ , "id"], sample_id = sample_try[1], table[ , grepl(".mean", names(table))])
+
+
+for (i in 2:length(sample_try)) {
+  print(file_try[i])
+  new_table <- as.data.frame(read_csv((paste(main_dir, file_try[i], sep="/")), show_col_types = FALSE))
+  new_table <- data.frame(id = new_table[ , "id"], sample_id = sample_try[i], new_table[ , grepl(".mean", names(new_table))])
+  table <- rbind(table, new_table)
+}
+
+
+```
+
+```{r}
+#Preparing a dataframe for the analysis by naming and merging data
+
+sample_ids <- c("Patient1_s1", "Patient1_s2", "Patient2_s1", "Patient2_s2", "Patient3_s1", "Patient4_s1", "Patient5_s1", "Patient5_s2", 
+                "Patient6_s1","Patient6_s2", "Patient7_s1", "Patient7_s2", "Patient8_s1", "Patient8_s2", "Patient9_s1", "Patient9_s2", 
+                "Patient10_s1", "Patient10_s2", "Patient11_s1", "Patient11_s2", "Patient12_s1", "Patient12_s2", "Patient13_s1", "Patient13_s2", 
+                "Patient14_s1", "Patient14_s2", "Patient15_s1","Patient15_s2", "Patient16_s1", "Patient16_s2", "Patient17_s1", "Patient17_s2", 
+                "Patient18_s1", "Patient18_s2", "Patient19_s1", "Patient19_s2")
+file_names <- list.files(main_dir,recursive = TRUE)
+
+table <- as.data.frame(read_csv((paste(main_dir, file_names[1], sep="/")), show_col_types = FALSE))
+table <- data.frame(id = table[ , "id"], sample_id = sample_ids[1], table[ , grepl(".mean", names(table))])
+
+
+for (i in 2:length(sample_ids)) {
+  print(file_names[i])
+  new_table <- as.data.frame(read_csv((paste(main_dir, file_names[i], sep="/")), show_col_types = FALSE))
+  new_table <- data.frame(id = new_table[ , "id"], sample_id = sample_ids[i], new_table[ , grepl(".mean", names(new_table))])
+  table <- rbind(table, new_table)
+  
+  print(unique(table$sample_id)) 
+}
+length(unique(table$sample_id))
+
+write.csv(table, file = "/filepath/intensity_tables.csv")
+```
+
+```{r}
+#Uploading file, saved from the previous step, converting into df
+
+tables <- read_csv("/filepath/intensity_tables.csv")
+for_spe_assay <- data.frame(tables[,c("id", "sample_id","BCL6.mean")])
+```
+
+#Combining annotations with samples (cells)
+```{r}
+mt = match(prelim_ann$id, for_spe_assay$id)
+table(is.na(mt))
+tables_for_spe = cbind(prelim_ann, for_spe_assay[mt, ])
+
+#write.csv(full_tables, file = "/filepath/cleaned_full_tables.csv")
+```
+
+#Getting rid from the duplicated info
+```{r}
+idx = which(duplicated(names(tables_for_spe)))
+tables_for_spe = tables_for_spe[,-idx]
+```
+
+#Creating spatial experiment object
+```{r}
+intensities <- data.frame(tables_for_spe[ , "BCL6.mean"])
+
+assays <- list(counts=t(intensities))
+xy <- as.matrix(tables_for_spe[, c("x", "y")])
+  
+#Build SpatialExperiment object  
+spe <- SpatialExperiment(
+  assay = assays,
+  colData = tables_for_spe[,-9],
+  spatialCoords = xy
+  )
+
+saveRDS(spe, file = "/filepath/spe.rds")
+```
+
+
+#Uploading the object from the next step
+```{r}
+spe <- readRDS("/filepath/spe.rds")
+```
+
+
+#Performing clustering of the cells based on neighborhood aggregation
+```{r fig.width=24, fig.height=18}
+spe <- aggregateNeighbors(spe, colPairName = "knn_interaction_graph", 
+                          aggregate_by = "metadata", count_by = "name")
+
+set.seed(220705)
+
+cn_1 <- kmeans(spe$aggregatedNeighbors, centers = 11)
+spe$cn_celltypes <- as.factor(cn_1$cluster)
+
+plotSpatial(spe, 
+            node_color_by = "cn_celltypes", 
+            img_id = "slide", 
+            node_size_fix = 0.5,
+            coords = c("x", "y")) +
+    scale_color_brewer(palette = "Set3")
+```
+
+
+```{r}
+ggsave(filename = "/filepath/r_nh.png")
+```
+
+
+```{r}
+
+```
+
+
+```{r}
+```
+
